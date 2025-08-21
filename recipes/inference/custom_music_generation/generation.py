@@ -78,7 +78,7 @@ class MusicLlama:
         llama_config = LlamaConfig.from_pretrained(model_config_path)
         model = LlamaForCausalLM(llama_config) 
         start_time = time.time()
-        checkpoint = torch.load(ckpt_dir)
+        checkpoint = torch.load(ckpt_dir, weights_only=True)
         checkpoint = checkpoint['model_state_dict']
         new_state_dict = {}
         for k, v in checkpoint.items():
