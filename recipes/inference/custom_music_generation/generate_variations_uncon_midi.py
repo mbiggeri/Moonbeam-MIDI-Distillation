@@ -35,8 +35,8 @@ def generate_midi_variations(
     
     # --- System Configuration ---
     max_seq_len: int = 1024,
-    max_batch_size: int = 1,  # Set to 1 as we generate variations in a loop
-    seed: int = random.randint(1000, 2**31 - 1)  # Random seed for reproducibility
+    max_batch_size: int = 1,
+    seed: int = random.randint(1000, 2**31 - 1)
 ):
     """
     Generates multiple variations of a given MIDI file by prompting a trained model.
@@ -76,12 +76,23 @@ def generate_midi_variations(
         seed_data = np.load(prompt_file_path)
         # Encode the data and add a Start-Of-Sequence token
         seed_data_encoded = generator.tokenizer.encode_series(seed_data, if_add_sos=True, if_add_eos=False)
-        # Use the first few tokens as the prompt
-        prompt_tokens = seed_data_encoded[:prompt_len]
-        
-        if len(prompt_tokens) < prompt_len:
-            print(f"   Warning: The prompt file is shorter than `prompt_len`. Using all {len(prompt_tokens)} tokens as prompt.")
-    
+        total_tokens = len(seed_data_encoded)
+
+        # --- MODIFICATION START ---
+        # Instead of taking the start, take a random slice from the song.
+        if total_tokens <= prompt_len:
+            print(f"   Warning: The song has only {total_tokens} tokens. Using the entire song as the prompt.")
+            prompt_tokens = seed_data_encoded
+        else:
+            # Define the latest possible starting point for the slice
+            max_start_index = total_tokens - prompt_len
+            # Choose a random starting point
+            start_index = random.randint(0, max_start_index)
+            end_index = start_index + prompt_len
+            prompt_tokens = seed_data_encoded[start_index:end_index]
+            print(f"   Selected a random {prompt_len}-token segment starting at token {start_index}.")
+        # --- MODIFICATION END ---
+            
     except FileNotFoundError:
         print(f"   ERROR: The prompt file '{prompt_file_path}' was not found.")
         return
@@ -92,19 +103,18 @@ def generate_midi_variations(
     print(f"   Successfully created a prompt with {len(prompt_tokens)} tokens.")
 
     # --- 4. Generate music in a loop, creating variations ---
+    # (The rest of the script remains exactly the same)
     print(f"\n4. Starting generation of {number_generations} variations...")
     
     base_path, extension = os.path.splitext(output_path)
     os.makedirs(os.path.dirname(base_path), exist_ok=True)
 
     for i in range(number_generations):
-        # For each generation, sample new parameters from the specified ranges
         temp = random.uniform(min_temperature, max_temperature)
         top_p_val = random.uniform(min_top_p, max_top_p)
         
         print(f"\n   ({i+1}/{number_generations}) Generating with temp={temp:.3f}, top_p={top_p_val:.3f}...")
 
-        # Call the generator with the single prompt and the new parameters
         results = generator.music_completion(
             [prompt_tokens],
             max_gen_len=max_gen_len,
@@ -114,15 +124,11 @@ def generate_midi_variations(
         print("   ...Generation complete.")
 
         # --- 5. Save the generated MIDI file for this variation ---
-        result = results[0]  # The result is the first and only item in the list
-        
-        # Create an informative filename including the generation parameters
+        result = results[0]
         current_output_path = f"{base_path}_{i+1}_temp{temp:.2f}_topp{top_p_val:.2f}{extension}"
-        
         result['generation']['content'].save(current_output_path)
         print(f"   ✅ Saved variation to: {current_output_path}")
 
-        # Save the prompt used for generation, but only once
         if i == 0:
             prompt_output_path = f"{base_path}_base_prompt{extension}"
             result['generation']['prompt'].save(prompt_output_path)
