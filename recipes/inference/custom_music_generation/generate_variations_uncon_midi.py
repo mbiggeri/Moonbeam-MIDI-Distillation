@@ -34,8 +34,7 @@ def generate_midi_variations(
     max_gen_len: int = 512,
     
     # --- System and Performance Configuration ---
-    # --- THIS IS THE KEY NEW ARGUMENT ---
-    batch_size: int = 8, # Set how many songs to generate in parallel.
+    batch_size: int = 8,
     max_seq_len: int = 1024,
     seed: int = random.randint(1000, 2**31 - 1)
 ):
@@ -53,14 +52,13 @@ def generate_midi_variations(
         torch.cuda.manual_seed_all(seed)
 
     # --- 2. Load the model and tokenizer ---
-    # The model is built with the specified batch size to pre-allocate memory.
     print(f"2. Loading the MusicLlama model with a batch size of {batch_size}...")
     generator = MusicLlama.build(
         ckpt_dir=ckpt_dir,
         model_config_path=model_config_path,
         tokenizer_path=tokenizer_path,
         max_seq_len=max_seq_len,
-        max_batch_size=batch_size, # Use the new batch_size argument here
+        max_batch_size=batch_size,
         finetuned_PEFT_weight_path=finetuned_PEFT_weight_path,
         seed=seed
     )
@@ -94,29 +92,16 @@ def generate_midi_variations(
     
     base_path, extension = os.path.splitext(output_path)
     os.makedirs(os.path.dirname(base_path), exist_ok=True)
-
-    # Save the prompt used for this entire run once
-    prompt_midi = generator.tokenizer.decode_to_midi(prompt_tokens)
-    prompt_output_path = f"{base_path}_base_prompt{extension}"
-    prompt_midi.save(prompt_output_path)
-    print(f"   ✅ Saved base prompt to: {prompt_output_path}")
-
-    # --- MODIFIED LOOP LOGIC ---
-    # Loop in steps of batch_size instead of one by one.
+    
     for i in range(0, number_generations, batch_size):
-        # Determine the size of the current batch (handles the last, possibly smaller, batch)
         current_batch_size = min(batch_size, number_generations - i)
-
-        # Sample new parameters for this entire batch
         temp = random.uniform(min_temperature, max_temperature)
         top_p_val = random.uniform(min_top_p, max_top_p)
         
         print(f"\n   Generating batch starting at song {i+1} (size: {current_batch_size}) with temp={temp:.3f}, top_p={top_p_val:.3f}...")
         
-        # Create a batch of prompts by duplicating the single prompt
         prompts_batch = [prompt_tokens] * current_batch_size
 
-        # Call the generator once for the entire batch
         results = generator.music_completion(
             prompts_batch,
             max_gen_len=max_gen_len,
@@ -125,14 +110,20 @@ def generate_midi_variations(
         )
         print("   ...Batch generation complete.")
 
+        # --- CORRECTION START ---
+        # Save the prompt, but only on the very first batch (i == 0).
+        # We get the savable prompt object from the 'results' dictionary.
+        if i == 0:
+            prompt_output_path = f"{base_path}_base_prompt{extension}"
+            # The 'prompt' is the same for all items in the batch, so we take it from the first result.
+            results[0]['generation']['prompt'].save(prompt_output_path)
+            print(f"   ✅ Saved base prompt to: {prompt_output_path}")
+        # --- CORRECTION END ---
+
         # --- 5. Save the generated MIDI files for this batch ---
         for j, result in enumerate(results):
-            # Calculate the global index for the file name (e.g., variation_1, variation_2, ...)
             file_index = i + j + 1
-            
-            # Create an informative filename
             current_output_path = f"{base_path}_{file_index}_temp{temp:.2f}_topp{top_p_val:.2f}{extension}"
-            
             result['generation']['content'].save(current_output_path)
             print(f"   ✅ Saved variation to: {current_output_path}")
 
